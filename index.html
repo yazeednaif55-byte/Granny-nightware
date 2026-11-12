@@ -1,0 +1,1552 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>لعبة جراني 3D: وضع الكابوس</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;700;900&display=swap" rel="stylesheet">
+    <style>
+        * {
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        body {
+            font-family: 'Cairo', sans-serif;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #050505;
+            color: #e5e5e5;
+            touch-action: none;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        .safe-hud {
+            padding-top: max(10px, env(safe-area-inset-top));
+            padding-bottom: max(12px, env(safe-area-inset-bottom));
+            padding-left: max(14px, env(safe-area-inset-left));
+            padding-right: max(14px, env(safe-area-inset-right));
+        }
+        .vignette {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            box-shadow: inset 0 0 130px rgba(0, 0, 0, 0.94);
+            pointer-events: none;
+            z-index: 10;
+            transition: box-shadow 0.3s ease;
+        }
+        .danger-vignette {
+            box-shadow: inset 0 0 160px rgba(220, 38, 38, 0.78) !important;
+        }
+        .scanlines {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.2) 50%);
+            background-size: 100% 4px;
+            pointer-events: none;
+            z-index: 11;
+        }
+        @keyframes pulseFast {
+            0%, 100% { transform: scale(1); opacity: 0.9; }
+            50% { transform: scale(1.04); opacity: 1; }
+        }
+        .animate-pulse-fast {
+            animation: pulseFast 0.45s infinite;
+        }
+        /* Mobile Joystick & Touch Controls */
+        #joystick-zone {
+            position: fixed;
+            bottom: max(20px, env(safe-area-inset-bottom));
+            left: max(20px, env(safe-area-inset-left));
+            width: clamp(115px, 25vmin, 140px);
+            height: clamp(115px, 25vmin, 140px);
+            background: rgba(255, 255, 255, 0.14);
+            border: 3px solid rgba(220, 38, 38, 0.75);
+            border-radius: 50%;
+            touch-action: none;
+            z-index: 40;
+            backdrop-filter: blur(4px);
+        }
+        #joystick-knob {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 44%;
+            height: 44%;
+            background: radial-gradient(circle, #ef4444 0%, #991b1b 100%);
+            border: 2px solid #fecaca;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 0 18px rgba(239, 68, 68, 0.85);
+            pointer-events: none;
+        }
+        #look-zone {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            touch-action: none;
+            z-index: 15;
+        }
+        /* Portrait warning overlay for mobile */
+        @media screen and (orientation: portrait) and (max-width: 900px) {
+            #orientation-warning {
+                display: flex !important;
+            }
+        }
+    </style>
+</head>
+<body class="relative w-screen h-[100dvh] overflow-hidden">
+
+    <!-- Orientation Warning for Mobile Portrait -->
+    <div id="orientation-warning" class="hidden fixed inset-0 z-50 bg-black/95 flex-col items-center justify-center text-center p-6">
+        <div class="text-6xl mb-4 animate-bounce">📱🔄</div>
+        <h2 class="text-2xl font-black text-red-500 mb-2">يرجى تدوير الشاشة للوضع الأفقي!</h2>
+        <p class="text-zinc-400 text-sm">للحصول على أفضل تجربة تحكم ورؤية واضحة للرعب، اقلب جهازك بالعرض.</p>
+    </div>
+
+    <!-- Horror FX overlays -->
+    <div class="vignette" id="vignette"></div>
+    <div class="scanlines"></div>
+
+    <!-- Three.js Canvas Container -->
+    <div id="canvas-container" class="absolute inset-0 z-0"></div>
+
+    <!-- START MENU OVERLAY -->
+    <div id="start-menu" class="fixed inset-0 z-40 bg-black/95 flex items-center justify-center p-3 overflow-y-auto safe-hud">
+        <div class="max-w-lg w-full bg-zinc-900/90 border-2 border-red-900/80 p-4 sm:p-6 rounded-2xl shadow-2xl backdrop-blur-md my-auto">
+            <h1 class="text-2xl sm:text-4xl font-900 text-red-600 mb-1 tracking-wider drop-shadow-[0_5px_15px_rgba(220,38,38,0.6)]">لعبة جراني: وضع الكابوس</h1>
+            <p class="text-zinc-400 mb-3 text-xs sm:text-sm">المنزل مظلم، جراني تسمع كل صوت وتتحرك بسرعة مرعبة. اجمع الأدوات واهرب!</p>
+            
+            <div class="bg-red-950/40 border border-red-800/50 p-3 rounded-xl mb-4 text-right text-[11px] sm:text-xs text-red-200 space-y-1">
+                <p>⚠️ <strong>تحذير الكابوس:</strong></p>
+                <p>• الجراني سريعة وتلاحقك فور سماع صوت الركض أو الفخاخ.</p>
+                <p>• يمكنك الاختباء داخل الخزائن الخشبية للهروب من نظرها.</p>
+            </div>
+
+            <button id="start-btn" type="button" class="w-full py-3.5 sm:py-4 bg-gradient-to-r from-red-700 to-red-900 hover:from-red-600 hover:to-red-800 text-white font-bold text-base sm:text-lg rounded-xl shadow-lg shadow-red-900/50 transition active:scale-95 border border-red-500/30 cursor-pointer touch-manipulation">
+                ابدأ الكابوس (العب الآن)
+            </button>
+            <div class="mt-2 text-zinc-500 text-[10px] sm:text-xs">الجوال: اسحب الشاشة للنظر، الجير للمشي | الكمبيوتر: WASD + الماوس</div>
+        </div>
+    </div>
+
+    <!-- HUD OVERLAY -->
+    <div id="hud" class="hidden fixed inset-0 z-20 pointer-events-none flex flex-col justify-between safe-hud">
+        <!-- Top Bar: Day/Status, Missions & Threat -->
+        <div class="flex justify-between items-start gap-2 w-full">
+            <!-- Day & Status -->
+            <div class="bg-black/80 border border-red-900/60 backdrop-blur-md px-3 py-1.5 rounded-xl shadow-lg shrink-0">
+                <div class="flex items-center gap-1.5">
+                    <span class="w-2.5 h-2.5 rounded-full bg-red-600 animate-ping"></span>
+                    <span id="day-display" class="text-red-500 font-black text-sm sm:text-base">اليوم 1 - كابوس</span>
+                </div>
+                <div id="status-msg" class="text-[11px] sm:text-xs text-zinc-300 mt-0.5 max-w-[170px] sm:max-w-[230px] truncate">ابحث عن الأدوات للهروب...</div>
+            </div>
+
+            <!-- Compact Mission Checklist (Top Center) -->
+            <div class="bg-black/80 border border-zinc-800/90 backdrop-blur-md px-3 py-1.5 rounded-xl text-[10px] sm:text-xs shadow-lg max-w-[220px] sm:max-w-xs">
+                <div class="text-red-400 font-bold mb-0.5 border-b border-zinc-800 pb-0.5">📋 مهام الهروب:</div>
+                <ul class="space-y-0.5 text-zinc-300">
+                    <li id="m-hammer">⬜ 1. المطرقة (كسر ألواح الأبواب)</li>
+                    <li id="m-wires">⬜ 2. الكماشة + قطع أسلاك الكهرباء</li>
+                    <li id="m-escape">⬜ 3. المفتاح الذهبي أو بطاقة القبو</li>
+                </ul>
+            </div>
+
+            <!-- Threat / Hiding Indicator -->
+            <div id="threat-indicator" class="hidden bg-red-950/90 border-2 border-red-600 px-3 py-1.5 rounded-xl text-red-200 font-bold text-xs sm:text-sm animate-pulse-fast shadow-lg shrink-0">
+                ⚠️ جراني قريبة!
+            </div>
+        </div>
+
+        <!-- Center Crosshair & Interaction Prompt -->
+        <div class="flex flex-col items-center justify-center my-auto">
+            <div id="crosshair" class="w-2.5 h-2.5 rounded-full border-2 border-white/80 bg-red-500/50 transition-transform duration-150"></div>
+            <div id="interact-prompt" class="hidden mt-2 bg-black/90 border border-red-500/80 px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-bold text-amber-300 shadow-xl text-center">
+                اضغط [تفاعل]
+            </div>
+        </div>
+
+        <!-- Bottom Bar: Inventory (Bottom Center) & Action Buttons (Fixed Bottom Right, clear of Left Joystick) -->
+        <div dir="ltr" class="w-full flex justify-between items-end pointer-events-none pb-1">
+            <!-- Spacer for Left Joystick -->
+            <div class="w-40 sm:w-48 shrink-0"></div>
+
+            <!-- Compact Inventory (Bottom Center) -->
+            <div dir="rtl" class="bg-black/85 border border-zinc-800 backdrop-blur-md px-2.5 py-1.5 rounded-xl flex items-center gap-1.5 shadow-xl pointer-events-auto mb-1">
+                <div class="flex gap-1.5">
+                    <div id="slot-hammer" class="w-8 h-8 sm:w-9 sm:h-9 bg-zinc-900/90 border border-zinc-700 rounded-lg flex items-center justify-center text-sm sm:text-base text-zinc-600" title="مطرقة">🔨</div>
+                    <div id="slot-pliers" class="w-8 h-8 sm:w-9 sm:h-9 bg-zinc-900/90 border border-zinc-700 rounded-lg flex items-center justify-center text-sm sm:text-base text-zinc-600" title="كماشة أسلاك">✂️</div>
+                    <div id="slot-key" class="w-8 h-8 sm:w-9 sm:h-9 bg-zinc-900/90 border border-zinc-700 rounded-lg flex items-center justify-center text-sm sm:text-base text-zinc-600" title="مفتاح رئيسي">🗝️</div>
+                    <div id="slot-code" class="w-8 h-8 sm:w-9 sm:h-9 bg-zinc-900/90 border border-zinc-700 rounded-lg flex items-center justify-center text-sm sm:text-base text-zinc-600" title="بطاقة القبو">💳</div>
+                </div>
+            </div>
+
+            <!-- Action Buttons (Fixed Bottom Right - Ergonomic Thumb Cluster, far from Left Joystick) -->
+            <div dir="rtl" class="flex flex-col items-end gap-2 pointer-events-auto z-40 shrink-0 pr-1">
+                <div class="flex gap-2">
+                    <button id="mob-flashlight" type="button" class="bg-zinc-900/95 border border-zinc-500 text-white px-3.5 py-2.5 rounded-xl font-bold text-xs sm:text-sm shadow-lg active:scale-95 flex items-center gap-1 touch-manipulation">🔦 مصباح</button>
+                    <button id="mob-run" type="button" class="bg-amber-800/95 border border-amber-400 text-white px-3.5 py-2.5 rounded-xl font-bold text-xs sm:text-sm shadow-lg active:scale-95 flex items-center gap-1 touch-manipulation">🏃 ركض</button>
+                </div>
+                <button id="mob-interact" type="button" class="bg-red-700/95 border-2 border-red-300 text-white px-6 py-3.5 rounded-2xl font-black text-sm sm:text-base shadow-xl active:scale-95 flex items-center gap-1.5 touch-manipulation">🖐️ تفاعل</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mobile Touch Look & Joystick Zones -->
+    <div id="look-zone" class="hidden"></div>
+    <div id="joystick-zone" class="hidden">
+        <div id="joystick-knob"></div>
+    </div>
+
+    <!-- JUMPSCARE / DAY TRANSITION / GAME OVER OVERLAY -->
+    <div id="screen-overlay" class="hidden fixed inset-0 z-50 bg-black flex flex-col items-center justify-center text-center p-6 safe-hud">
+        <div id="jumpscare-visual" class="hidden mb-4">
+            <div class="text-7xl sm:text-8xl animate-bounce">👵🩸</div>
+        </div>
+        <h2 id="overlay-title" class="text-3xl sm:text-5xl font-black text-red-600 mb-3">اليوم الثاني</h2>
+        <p id="overlay-sub" class="text-zinc-300 text-sm sm:text-lg max-w-md mb-6">الجراني أصبحت أسرع وأكثر غضباً...</p>
+        <button id="restart-btn" type="button" class="hidden px-8 py-4 bg-red-700 hover:bg-red-600 text-white font-bold text-lg sm:text-xl rounded-xl shadow-lg transition active:scale-95 cursor-pointer touch-manipulation">
+            العب مرة أخرى
+        </button>
+    </div>
+
+    <script>
+        // --- PROCEDURAL HORROR AUDIO ENGINE (Web Audio API) ---
+        let audioCtx = null;
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+        }
+
+        function playSound(type) {
+            if (!audioCtx) return;
+            try {
+                const now = audioCtx.currentTime;
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+
+                if (type === 'pickup') {
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(520, now);
+                    osc.frequency.exponentialRampToValueAtTime(880, now + 0.15);
+                    gain.gain.setValueAtTime(0.18, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+                    osc.start(now);
+                    osc.stop(now + 0.15);
+                } else if (type === 'footstep') {
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(95, now);
+                    osc.frequency.exponentialRampToValueAtTime(42, now + 0.08);
+                    gain.gain.setValueAtTime(0.09, now);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+                    osc.start(now);
+                    osc.stop(now + 0.08);
+                } else if (type === 'runstep') {
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(125, now);
+                    osc.frequency.exponentialRampToValueAtTime(48, now + 0.09);
+                    gain.gain.setValueAtTime(0.14, now);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.09);
+                    osc.start(now);
+                    osc.stop(now + 0.09);
+                } else if (type === 'heartbeat') {
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(65, now);
+                    osc.frequency.exponentialRampToValueAtTime(32, now + 0.16);
+                    gain.gain.setValueAtTime(0.28, now);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
+                    osc.start(now);
+                    osc.stop(now + 0.16);
+                } else if (type === 'wardrobe') {
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(180, now);
+                    osc.frequency.linearRampToValueAtTime(95, now + 0.25);
+                    gain.gain.setValueAtTime(0.15, now);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+                    osc.start(now);
+                    osc.stop(now + 0.25);
+                } else if (type === 'wirecut') {
+                    osc.type = 'square';
+                    osc.frequency.setValueAtTime(900, now);
+                    osc.frequency.exponentialRampToValueAtTime(140, now + 0.2);
+                    gain.gain.setValueAtTime(0.22, now);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+                    osc.start(now);
+                    osc.stop(now + 0.2);
+                } else if (type === 'trap') {
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(140, now);
+                    osc.frequency.exponentialRampToValueAtTime(40, now + 0.4);
+                    gain.gain.setValueAtTime(0.45, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+                    osc.start(now);
+                    osc.stop(now + 0.4);
+                } else if (type === 'jumpscare') {
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(220, now);
+                    osc.frequency.linearRampToValueAtTime(980, now + 0.1);
+                    osc.frequency.linearRampToValueAtTime(110, now + 0.7);
+                    gain.gain.setValueAtTime(0.65, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.7);
+                    osc.start(now);
+                    osc.stop(now + 0.7);
+                } else if (type === 'break') {
+                    osc.type = 'square';
+                    osc.frequency.setValueAtTime(160, now);
+                    osc.frequency.exponentialRampToValueAtTime(30, now + 0.25);
+                    gain.gain.setValueAtTime(0.3, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
+                    osc.start(now);
+                    osc.stop(now + 0.25);
+                }
+            } catch (e) {}
+        }
+
+        // --- GAME STATE ---
+        let gameStarted = false;
+        let isPaused = false;
+        let currentDay = 1;
+        const maxDays = 5;
+
+        const player = {
+            x: 0, y: 1.7, z: 12,
+            yaw: 0, pitch: 0,
+            speed: 5.5,
+            runSpeed: 9.0,
+            isRunning: false,
+            flashlightOn: true,
+            trappedTimer: 0,
+            isHiding: false,
+            hidingSpot: null,
+            stepTimer: 0,
+            inventory: {
+                hammer: false,
+                pliers: false,
+                key: false,
+                code: false
+            }
+        };
+
+        const doorState = {
+            plankRemoved: false,
+            wiresCut: false,
+            unlocked: false
+        };
+
+        const basementState = {
+            plankRemoved: false,
+            unlocked: false
+        };
+
+        const granny = {
+            mesh: null,
+            x: 0, z: -12,
+            speed: 3.2,
+            chaseSpeed: 4.5, // تقليل السرعة لتكون واقعية ومرعبة وليست سريعة بشكل جنوني
+            state: 'patrol',
+            targetX: 0, targetZ: -12,
+            waypointIndex: 0,
+            searchTimer: 0,
+            stepTimer: 0,
+            heartbeatTimer: 0,
+            waypoints: [
+                {x: 0, z: -12},
+                {x: -11, z: -8},
+                {x: -11, z: 8},
+                {x: 0, z: 6},
+                {x: 11, z: 8},
+                {x: 11, z: -8}
+            ]
+        };
+
+        // --- THREE.JS SCENE SETUP ---
+        let scene, camera, renderer, flashlight, ambientLight;
+        const colliders = [];
+        const interactiveObjects = [];
+        const bearTraps = [];
+
+        function initGame3D() {
+            const container = document.getElementById('canvas-container');
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x020204);
+            scene.fog = new THREE.FogExp2(0x020204, 0.065);
+
+            camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.1, 60);
+            camera.rotation.order = 'YXZ';
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.outputEncoding = THREE.sRGBEncoding;
+            container.innerHTML = '';
+            container.appendChild(renderer.domElement);
+
+            // Realistic Atmospheric Lighting
+            ambientLight = new THREE.AmbientLight(0x1a1d24, 0.65);
+            scene.add(ambientLight);
+
+            // Strong Realistic Flashlight
+            flashlight = new THREE.SpotLight(0xfff5df, 7.5, 55, Math.PI / 2.8, 0.4, 0.6);
+            flashlight.castShadow = true;
+            flashlight.shadow.mapSize.width = 1024;
+            flashlight.shadow.mapSize.height = 1024;
+            scene.add(flashlight);
+            scene.add(flashlight.target);
+
+            const playerGlow = new THREE.PointLight(0xffedd5, 1.0, 9);
+            camera.add(playerGlow);
+            scene.add(camera);
+
+            buildRealisticHouse();
+            buildGranny();
+            spawnItemsAndTraps();
+            setupControls();
+
+            window.addEventListener('resize', onWindowResize);
+            animate();
+        }
+
+        function createRealisticWall(x, y, z, w, h, d, color = 0x1f1a17) {
+            const geo = new THREE.BoxGeometry(w, h, d);
+            const mat = new THREE.MeshStandardMaterial({
+                color: color,
+                roughness: 0.85,
+                metalness: 0.15
+            });
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.position.set(x, y, z);
+            mesh.receiveShadow = true;
+            mesh.castShadow = true;
+            scene.add(mesh);
+
+            colliders.push({
+                minX: x - w / 2 - 0.35,
+                maxX: x + w / 2 + 0.35,
+                minZ: z - d / 2 - 0.35,
+                maxZ: z + d / 2 + 0.35
+            });
+            return mesh;
+        }
+
+        function buildRealisticHouse() {
+            // Realistic Wooden Floor with Planks look
+            const floorGeo = new THREE.PlaneGeometry(34, 34);
+            const floorMat = new THREE.MeshStandardMaterial({ color: 0x14100d, roughness: 0.9, metalness: 0.05 });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            floor.receiveShadow = true;
+            scene.add(floor);
+
+            const ceilMat = new THREE.MeshStandardMaterial({ color: 0x090808, roughness: 0.95 });
+            const ceil = new THREE.Mesh(floorGeo, ceilMat);
+            ceil.rotation.x = Math.PI / 2;
+            ceil.position.y = 4.2;
+            scene.add(ceil);
+
+            // Detailed Walls
+            createRealisticWall(0, 2.1, -16, 32, 4.2, 0.6, 0x1c1715);
+            createRealisticWall(-16, 2.1, 0, 0.6, 4.2, 32, 0x1c1715);
+            createRealisticWall(16, 2.1, 0, 0.6, 4.2, 32, 0x1c1715);
+            createRealisticWall(-9.5, 2.1, 16, 13, 4.2, 0.6, 0x1c1715);
+            createRealisticWall(9.5, 2.1, 16, 13, 4.2, 0.6, 0x1c1715);
+
+            // Interior Partitions
+            createRealisticWall(-6, 2.1, -6, 0.5, 4.2, 12, 0x241d19);
+            createRealisticWall(-11, 2.1, 0, 6, 4.2, 0.5, 0x241d19);
+            createRealisticWall(6, 2.1, -6, 0.5, 4.2, 12, 0x241d19);
+            createRealisticWall(11, 2.1, 0, 6, 4.2, 0.5, 0x241d19);
+
+            // --- ESCAPE ROUTE 1: MAIN FRONT DOOR ---
+            const doorGroup = new THREE.Group();
+            doorGroup.position.set(0, 1.6, 15.9);
+
+            const doorMesh = new THREE.Mesh(
+                new THREE.BoxGeometry(3.4, 3.2, 0.3),
+                new THREE.MeshStandardMaterial({ color: 0x2b130e, roughness: 0.6, metalness: 0.2 })
+            );
+            doorGroup.add(doorMesh);
+
+            const plankMesh = new THREE.Mesh(
+                new THREE.BoxGeometry(3.6, 0.3, 0.45),
+                new THREE.MeshStandardMaterial({ color: 0x523318, roughness: 0.8 })
+            );
+            plankMesh.position.set(0, 0.2, -0.1);
+            doorGroup.add(plankMesh);
+
+            const wireBox = new THREE.Mesh(
+                new THREE.BoxGeometry(0.6, 0.7, 0.3),
+                new THREE.MeshStandardMaterial({ color: 0x7f1d1d, roughness: 0.5 })
+            );
+            wireBox.position.set(1.2, 0.4, -0.2);
+            doorGroup.add(wireBox);
+
+            scene.add(doorGroup);
+            interactiveObjects.push({
+                type: 'main_door',
+                mesh: doorGroup,
+                plankMesh: plankMesh,
+                wireBox: wireBox,
+                x: 0, y: 1.6, z: 15.2,
+                radius: 3.0
+            });
+
+            // --- ESCAPE ROUTE 2: BASEMENT HATCH ---
+            const basementGroup = new THREE.Group();
+            basementGroup.position.set(12, 0.15, -12);
+
+            const hatchMesh = new THREE.Mesh(
+                new THREE.BoxGeometry(2.6, 0.25, 2.6),
+                new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.8, roughness: 0.3 })
+            );
+            basementGroup.add(hatchMesh);
+
+            const basementPlank = new THREE.Mesh(
+                new THREE.BoxGeometry(2.8, 0.35, 0.35),
+                new THREE.MeshStandardMaterial({ color: 0x523318 })
+            );
+            basementPlank.position.set(0, 0.2, 0);
+            basementGroup.add(basementPlank);
+
+            scene.add(basementGroup);
+            interactiveObjects.push({
+                type: 'basement_door',
+                mesh: basementGroup,
+                plankMesh: basementPlank,
+                x: 12, y: 0.5, z: -12,
+                radius: 2.8
+            });
+
+            // --- HIDING WARDROBES ---
+            createWardrobe(-13.5, 5.5, Math.PI / 2);
+            createWardrobe(13.5, 5.5, -Math.PI / 2);
+            createWardrobe(-2, -13.5, 0);
+        }
+
+        function createWall(x, y, z, w, h, d, color = 0x262220) {
+            const geo = new THREE.BoxGeometry(w, h, d);
+            const mat = new THREE.MeshStandardMaterial({
+                color: color,
+                roughness: 0.9,
+                metalness: 0.1
+            });
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.position.set(x, y, z);
+            mesh.receiveShadow = true;
+            mesh.castShadow = true;
+            scene.add(mesh);
+
+            colliders.push({
+                minX: x - w / 2 - 0.35,
+                maxX: x + w / 2 + 0.35,
+                minZ: z - d / 2 - 0.35,
+                maxZ: z + d / 2 + 0.35
+            });
+            return mesh;
+        }
+
+        function buildHouse() {
+            // Floor & Ceiling
+            const floorGeo = new THREE.PlaneGeometry(34, 34);
+            const floorMat = new THREE.MeshStandardMaterial({ color: 0x1a1512, roughness: 0.95 });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            floor.receiveShadow = true;
+            scene.add(floor);
+
+            const ceilMat = new THREE.MeshStandardMaterial({ color: 0x0d0c0c });
+            const ceil = new THREE.Mesh(floorGeo, ceilMat);
+            ceil.rotation.x = Math.PI / 2;
+            ceil.position.y = 4.2;
+            scene.add(ceil);
+
+            // Outer Perimeter Walls
+            createWall(0, 2.1, -16, 32, 4.2, 0.6, 0x221d1a);
+            createWall(-16, 2.1, 0, 0.6, 4.2, 32, 0x221d1a);
+            createWall(16, 2.1, 0, 0.6, 4.2, 32, 0x221d1a);
+            createWall(-9.5, 2.1, 16, 13, 4.2, 0.6, 0x221d1a);
+            createWall(9.5, 2.1, 16, 13, 4.2, 0.6, 0x221d1a);
+
+            // Interior Room Partitions
+            createWall(-6, 2.1, -6, 0.5, 4.2, 12, 0x2b2420);
+            createWall(-11, 2.1, 0, 6, 4.2, 0.5, 0x2b2420);
+            createWall(6, 2.1, -6, 0.5, 4.2, 12, 0x2b2420);
+            createWall(11, 2.1, 0, 6, 4.2, 0.5, 0x2b2420);
+
+            // --- ESCAPE ROUTE 1: MAIN FRONT DOOR (z = 16, x = 0) ---
+            const doorGroup = new THREE.Group();
+            doorGroup.position.set(0, 1.6, 15.9);
+
+            const doorMesh = new THREE.Mesh(
+                new THREE.BoxGeometry(3.4, 3.2, 0.3),
+                new THREE.MeshStandardMaterial({ color: 0x3b1810, roughness: 0.7 })
+            );
+            doorGroup.add(doorMesh);
+
+            const plankMesh = new THREE.Mesh(
+                new THREE.BoxGeometry(3.6, 0.3, 0.45),
+                new THREE.MeshStandardMaterial({ color: 0x6b4423 })
+            );
+            plankMesh.position.set(0, 0.2, -0.1);
+            doorGroup.add(plankMesh);
+
+            const wireBox = new THREE.Mesh(
+                new THREE.BoxGeometry(0.6, 0.7, 0.3),
+                new THREE.MeshStandardMaterial({ color: 0x991b1b })
+            );
+            wireBox.position.set(1.2, 0.4, -0.2);
+            doorGroup.add(wireBox);
+
+            scene.add(doorGroup);
+
+            interactiveObjects.push({
+                type: 'main_door',
+                mesh: doorGroup,
+                plankMesh: plankMesh,
+                wireBox: wireBox,
+                x: 0, y: 1.6, z: 15.2,
+                radius: 3.0
+            });
+
+            // --- ESCAPE ROUTE 2: SECRET BASEMENT HATCH (x = 12, z = -12) ---
+            const basementGroup = new THREE.Group();
+            basementGroup.position.set(12, 0.15, -12);
+
+            const hatchMesh = new THREE.Mesh(
+                new THREE.BoxGeometry(2.6, 0.25, 2.6),
+                new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.7, roughness: 0.3 })
+            );
+            basementGroup.add(hatchMesh);
+
+            const basementPlank = new THREE.Mesh(
+                new THREE.BoxGeometry(2.8, 0.35, 0.35),
+                new THREE.MeshStandardMaterial({ color: 0x78350f })
+            );
+            basementPlank.position.set(0, 0.2, 0);
+            basementGroup.add(basementPlank);
+
+            scene.add(basementGroup);
+
+            interactiveObjects.push({
+                type: 'basement_door',
+                mesh: basementGroup,
+                plankMesh: basementPlank,
+                x: 12, y: 0.5, z: -12,
+                radius: 2.8
+            });
+
+            // --- HIDING WARDROBES ---
+            createWardrobe(-13.5, 5.5, Math.PI / 2);
+            createWardrobe(13.5, 5.5, -Math.PI / 2);
+            createWardrobe(-2, -13.5, 0);
+
+            // --- CREEPY PROPS ---
+            const table1 = createWall(-11, 0.5, -11, 2.5, 1.0, 1.5, 0x3a2518);
+            const candleLight1 = new THREE.PointLight(0xff4422, 1.3, 9);
+            candleLight1.position.set(-11, 1.5, -11);
+            scene.add(candleLight1);
+
+            const table2 = createWall(11, 0.5, 11, 2.2, 1.0, 2.2, 0x3a2518);
+            const candleLight2 = new THREE.PointLight(0xff4422, 1.3, 9);
+            candleLight2.position.set(11, 1.5, 11);
+            scene.add(candleLight2);
+        }
+
+        function createWardrobe(x, z, rotY) {
+            const group = new THREE.Group();
+            group.position.set(x, 1.4, z);
+            group.rotation.y = rotY;
+
+            const body = new THREE.Mesh(
+                new THREE.BoxGeometry(1.6, 2.8, 1.1),
+                new THREE.MeshStandardMaterial({ color: 0x2d1b11, roughness: 0.85 })
+            );
+            group.add(body);
+
+            const doorLine = new THREE.Mesh(
+                new THREE.BoxGeometry(0.05, 2.6, 1.14),
+                new THREE.MeshStandardMaterial({ color: 0x110a06 })
+            );
+            group.add(doorLine);
+
+            scene.add(group);
+            interactiveObjects.push({
+                type: 'wardrobe',
+                mesh: group,
+                x: x, y: 1.4, z: z,
+                exitX: x + Math.sin(rotY) * 1.6,
+                exitZ: z + Math.cos(rotY) * 1.6,
+                radius: 2.3
+            });
+        }
+
+        function buildGranny() {
+            const gGroup = new THREE.Group();
+
+            // Tattered Bloody Dress
+            const dressGeo = new THREE.CylinderGeometry(0.24, 0.52, 1.35, 14);
+            const dressMat = new THREE.MeshStandardMaterial({ color: 0x3b3532, roughness: 0.95 });
+            const dress = new THREE.Mesh(dressGeo, dressMat);
+            dress.position.y = 0.72;
+            dress.castShadow = true;
+            gGroup.add(dress);
+
+            const bloodStain = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.26, 0.45, 0.55, 12),
+                new THREE.MeshStandardMaterial({ color: 0x5c0a0a, roughness: 0.8 })
+            );
+            bloodStain.position.y = 0.55;
+            gGroup.add(bloodStain);
+
+            // Hunched Upper Torso & Shoulders
+            const torso = new THREE.Mesh(
+                new THREE.SphereGeometry(0.32, 12, 12),
+                new THREE.MeshStandardMaterial({ color: 0x2e2927, roughness: 0.9 })
+            );
+            torso.position.set(0, 1.35, 0.06);
+            torso.scale.set(1.1, 0.9, 0.85);
+            gGroup.add(torso);
+
+            // Creepy Pale Wrinkled Head
+            const headGeo = new THREE.SphereGeometry(0.24, 16, 16);
+            const headMat = new THREE.MeshStandardMaterial({ color: 0xbcb0a4, roughness: 0.85 });
+            const head = new THREE.Mesh(headGeo, headMat);
+            head.position.set(0, 1.68, 0.14);
+            head.scale.set(0.92, 1.12, 0.95);
+            gGroup.add(head);
+
+            // Messy White Hair & Bun
+            const hairCap = new THREE.Mesh(
+                new THREE.SphereGeometry(0.25, 14, 14),
+                new THREE.MeshStandardMaterial({ color: 0xd4d4d8, roughness: 0.9 })
+            );
+            hairCap.position.set(0, 1.74, 0.08);
+            gGroup.add(hairCap);
+
+            const hairBun = new THREE.Mesh(
+                new THREE.SphereGeometry(0.14, 12, 12),
+                new THREE.MeshStandardMaterial({ color: 0xe4e4e7, roughness: 0.9 })
+            );
+            hairBun.position.set(0, 1.82, -0.14);
+            gGroup.add(hairBun);
+
+            // Glowing Nightmare Red Eyes
+            const eyeGeo = new THREE.SphereGeometry(0.038, 10, 10);
+            const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+            const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
+            leftEye.position.set(-0.08, 1.70, 0.35);
+            const rightEye = new THREE.Mesh(eyeGeo, eyeMat);
+            rightEye.position.set(0.08, 1.70, 0.35);
+            gGroup.add(leftEye, rightEye);
+
+            // Dark Hollow Mouth
+            const mouth = new THREE.Mesh(
+                new THREE.BoxGeometry(0.1, 0.04, 0.03),
+                new THREE.MeshBasicMaterial({ color: 0x1a0000 })
+            );
+            mouth.position.set(0, 1.56, 0.35);
+            gGroup.add(mouth);
+
+            // Arms
+            const armMat = new THREE.MeshStandardMaterial({ color: 0xa89b8e, roughness: 0.85 });
+            const leftArm = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.045, 0.75, 8), armMat);
+            leftArm.position.set(-0.34, 1.15, 0.15);
+            leftArm.rotation.set(0.5, 0, 0.2);
+            gGroup.add(leftArm);
+
+            const rightArm = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.045, 0.75, 8), armMat);
+            rightArm.position.set(0.34, 1.15, 0.22);
+            rightArm.rotation.set(0.8, 0, -0.2);
+            gGroup.add(rightArm);
+
+            // Bloody Wooden Bat
+            const batGeo = new THREE.CylinderGeometry(0.04, 0.075, 1.05, 10);
+            const batMat = new THREE.MeshStandardMaterial({ color: 0x4a1d12, roughness: 0.7 });
+            const bat = new THREE.Mesh(batGeo, batMat);
+            bat.position.set(0.42, 0.95, 0.48);
+            bat.rotation.x = Math.PI / 3;
+            gGroup.add(bat);
+
+            const batBlood = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.068, 0.077, 0.32, 10),
+                new THREE.MeshStandardMaterial({ color: 0x990000, roughness: 0.5 })
+            );
+            batBlood.position.set(0.42, 0.80, 0.76);
+            batBlood.rotation.x = Math.PI / 3;
+            gGroup.add(batBlood);
+
+            // Eerie Red Aura Light around Granny
+            const grannyAura = new THREE.PointLight(0xdc2626, 1.5, 6);
+            grannyAura.position.set(0, 1.5, 0.3);
+            gGroup.add(grannyAura);
+
+            gGroup.position.set(granny.x, 0, granny.z);
+            scene.add(gGroup);
+            granny.mesh = gGroup;
+        }
+
+        function spawnItemsAndTraps() {
+            interactiveObjects.slice().forEach(obj => {
+                if (obj.type.startsWith('item_')) {
+                    scene.remove(obj.mesh);
+                    const idx = interactiveObjects.indexOf(obj);
+                    if (idx > -1) interactiveObjects.splice(idx, 1);
+                }
+            });
+            bearTraps.forEach(t => scene.remove(t.mesh));
+            bearTraps.length = 0;
+
+            createItem('item_hammer', -11, 1.15, -11, 0xd97706); // Hammer
+            createItem('item_pliers', 11, 1.15, 11, 0x3b82f6);   // Pliers
+            createItem('item_key', 0, 0.5, -14, 0xfacc15);       // Master Key
+            createItem('item_code', -12, 0.5, 12, 0x06b6d4);     // Basement Card
+
+            // Bear traps
+            const trapLocations = [
+                {x: -3, z: 3},
+                {x: 4, z: -2},
+                {x: -8, z: -4},
+                {x: 8, z: 4},
+                {x: 0, z: -8}
+            ];
+
+            trapLocations.forEach(pos => {
+                const trapMesh = new THREE.Mesh(
+                    new THREE.CylinderGeometry(0.48, 0.48, 0.08, 12),
+                    new THREE.MeshStandardMaterial({ color: 0x3f3f46, metalness: 0.8, roughness: 0.3 })
+                );
+                trapMesh.position.set(pos.x, 0.04, pos.z);
+                scene.add(trapMesh);
+                bearTraps.push({ x: pos.x, z: pos.z, mesh: trapMesh, triggered: false });
+            });
+        }
+
+        function createItem(type, x, y, z, color) {
+            const group = new THREE.Group();
+            group.position.set(x, y, z);
+
+            const mesh = new THREE.Mesh(
+                new THREE.BoxGeometry(0.45, 0.25, 0.45),
+                new THREE.MeshStandardMaterial({ color: color, emissive: color, emissiveIntensity: 0.45 })
+            );
+            group.add(mesh);
+
+            const beacon = new THREE.PointLight(color, 1.1, 4.5);
+            beacon.position.y = 0.4;
+            group.add(beacon);
+
+            scene.add(group);
+            interactiveObjects.push({
+                type: type,
+                mesh: group,
+                x: x, y: y, z: z,
+                radius: 2.3
+            });
+        }
+
+        // --- CONTROLS & JOYSTICK ---
+        const keys = {};
+        let joyVec = { x: 0, y: 0 };
+
+        function setupControls() {
+            document.addEventListener('keydown', (e) => {
+                keys[e.code] = true;
+                if (e.code === 'KeyF') toggleFlashlight();
+                if (e.code === 'KeyE') interact();
+                if (e.code === 'ShiftLeft') player.isRunning = true;
+            });
+
+            document.addEventListener('keyup', (e) => {
+                keys[e.code] = false;
+                if (e.code === 'ShiftLeft') player.isRunning = false;
+            });
+
+            // Desktop Pointer Lock
+            renderer.domElement.addEventListener('click', () => {
+                if (gameStarted && !isPaused && window.innerWidth > 900) {
+                    renderer.domElement.requestPointerLock?.();
+                }
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (document.pointerLockElement === renderer.domElement && !isPaused) {
+                    player.yaw -= e.movementX * 0.0024;
+                    player.pitch -= e.movementY * 0.0024;
+                    player.pitch = Math.max(-Math.PI / 2.3, Math.min(Math.PI / 2.3, player.pitch));
+                }
+            });
+
+            // Touch Look Controls on Entire Screen (Multi-touch safe)
+            const lookZone = document.getElementById('look-zone');
+            let lookTouchId = null;
+            let lastTouchX = 0, lastTouchY = 0;
+
+            lookZone.addEventListener('touchstart', (e) => {
+                if (lookTouchId === null && e.changedTouches.length > 0) {
+                    const t = e.changedTouches[0];
+                    lookTouchId = t.identifier;
+                    lastTouchX = t.clientX;
+                    lastTouchY = t.clientY;
+                }
+            }, { passive: false });
+
+            lookZone.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                for (let i = 0; i < e.changedTouches.length; i++) {
+                    const t = e.changedTouches[i];
+                    if (t.identifier === lookTouchId) {
+                        const dx = t.clientX - lastTouchX;
+                        const dy = t.clientY - lastTouchY;
+                        player.yaw -= dx * 0.006;
+                        player.pitch -= dy * 0.005;
+                        player.pitch = Math.max(-Math.PI / 2.3, Math.min(Math.PI / 2.3, player.pitch));
+                        lastTouchX = t.clientX;
+                        lastTouchY = t.clientY;
+                    }
+                }
+            }, { passive: false });
+
+            lookZone.addEventListener('touchend', (e) => {
+                for (let i = 0; i < e.changedTouches.length; i++) {
+                    if (e.changedTouches[i].identifier === lookTouchId) {
+                        lookTouchId = null;
+                    }
+                }
+            });
+
+            // Mobile Joystick (Multi-touch & Immediate Response)
+            const joyZone = document.getElementById('joystick-zone');
+            const joyKnob = document.getElementById('joystick-knob');
+            let joyTouchId = null;
+
+            function updateJoystickPosition(clientX, clientY) {
+                const rect = joyZone.getBoundingClientRect();
+                const centerX = rect.left + rect.width / 2;
+                const centerY = rect.top + rect.height / 2;
+                const maxDist = rect.width / 2;
+                let dx = clientX - centerX;
+                let dy = clientY - centerY;
+                const dist = Math.hypot(dx, dy);
+                if (dist > maxDist) {
+                    dx = (dx / dist) * maxDist;
+                    dy = (dy / dist) * maxDist;
+                }
+                joyKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+                joyVec.x = dx / maxDist;
+                joyVec.y = dy / maxDist;
+            }
+
+            joyZone.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (joyTouchId === null && e.changedTouches.length > 0) {
+                    const t = e.changedTouches[0];
+                    joyTouchId = t.identifier;
+                    updateJoystickPosition(t.clientX, t.clientY);
+                }
+            }, { passive: false });
+
+            joyZone.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                for (let i = 0; i < e.changedTouches.length; i++) {
+                    const t = e.changedTouches[i];
+                    if (t.identifier === joyTouchId) {
+                        updateJoystickPosition(t.clientX, t.clientY);
+                    }
+                }
+            }, { passive: false });
+
+            function resetJoystick(e) {
+                for (let i = 0; i < e.changedTouches.length; i++) {
+                    if (e.changedTouches[i].identifier === joyTouchId) {
+                        joyTouchId = null;
+                        joyKnob.style.transform = `translate(-50%, -50%)`;
+                        joyVec = { x: 0, y: 0 };
+                    }
+                }
+            }
+
+            joyZone.addEventListener('touchend', resetJoystick);
+            joyZone.addEventListener('touchcancel', resetJoystick);
+
+            // Mobile Action Buttons
+            const runBtn = document.getElementById('mob-run');
+            function toggleRun(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                player.isRunning = !player.isRunning;
+                if (player.isRunning) {
+                    runBtn.classList.remove('bg-amber-800/95', 'border-amber-400');
+                    runBtn.classList.add('bg-red-600', 'border-white');
+                    runBtn.innerText = '🏃 يركض';
+                } else {
+                    runBtn.classList.add('bg-amber-800/95', 'border-amber-400');
+                    runBtn.classList.remove('bg-red-600', 'border-white');
+                    runBtn.innerText = '🏃 ركض';
+                }
+            }
+            runBtn.addEventListener('touchstart', toggleRun, { passive: false });
+            runBtn.addEventListener('click', toggleRun);
+
+            const flashBtn = document.getElementById('mob-flashlight');
+            flashBtn.addEventListener('touchstart', (e) => { e.preventDefault(); e.stopPropagation(); toggleFlashlight(); }, { passive: false });
+            flashBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleFlashlight(); });
+
+            const interactBtn = document.getElementById('mob-interact');
+            interactBtn.addEventListener('touchstart', (e) => { e.preventDefault(); e.stopPropagation(); interact(); }, { passive: false });
+            interactBtn.addEventListener('click', (e) => { e.stopPropagation(); interact(); });
+        }
+
+        function toggleFlashlight() {
+            player.flashlightOn = !player.flashlightOn;
+            flashlight.visible = player.flashlightOn;
+            if (camera.children.length > 0) {
+                camera.children[0].visible = player.flashlightOn;
+            }
+            playSound('pickup');
+        }
+
+        function setStatus(msg) {
+            document.getElementById('status-msg').innerText = msg;
+        }
+
+        function updateMissionsUI() {
+            if (player.inventory.hammer) {
+                document.getElementById('m-hammer').innerHTML = '✅ 1. المطرقة جاهزة!';
+                document.getElementById('m-hammer').classList.add('text-green-400');
+            }
+            if (doorState.wiresCut) {
+                document.getElementById('m-wires').innerHTML = '✅ 2. تم قطع أسلاك الكهرباء!';
+                document.getElementById('m-wires').classList.add('text-green-400');
+            } else if (player.inventory.pliers) {
+                document.getElementById('m-wires').innerHTML = '🟡 2. الكماشة معك! اقطع صندوق الكهرباء';
+            }
+            if (player.inventory.key || player.inventory.code) {
+                document.getElementById('m-escape').innerHTML = '✅ 3. مفتاح/بطاقة الهروب جاهزة!';
+                document.getElementById('m-escape').classList.add('text-green-400');
+            }
+        }
+
+        function interact() {
+            if (isPaused) return;
+
+            // If currently hiding in wardrobe, exit it
+            if (player.isHiding && player.hidingSpot) {
+                player.isHiding = false;
+                player.x = player.hidingSpot.exitX;
+                player.z = player.hidingSpot.exitZ;
+                player.hidingSpot = null;
+                playSound('wardrobe');
+                setStatus('خرجت من الخزانة! تحرك بحذر.');
+                return;
+            }
+
+            let closest = null;
+            let minDist = 3.5;
+
+            interactiveObjects.forEach(obj => {
+                const d = Math.hypot(player.x - obj.x, player.z - obj.z);
+                if (d < obj.radius && d < minDist) {
+                    minDist = d;
+                    closest = obj;
+                }
+            });
+
+            if (!closest) return;
+
+            if (closest.type === 'wardrobe') {
+                player.isHiding = true;
+                player.hidingSpot = closest;
+                player.x = closest.x;
+                player.z = closest.z;
+                player.isRunning = false;
+                playSound('wardrobe');
+                setStatus('أنت مختبئ داخل الخزانة! جراني لن تراك.');
+            } else if (closest.type === 'item_hammer') {
+                player.inventory.hammer = true;
+                document.getElementById('slot-hammer').classList.replace('text-zinc-600', 'text-amber-400');
+                document.getElementById('slot-hammer').classList.add('border-amber-500');
+                scene.remove(closest.mesh);
+                interactiveObjects.splice(interactiveObjects.indexOf(closest), 1);
+                playSound('pickup');
+                setStatus('أخذت المطرقة 🔨! اكسر ألواح الباب أو القبو.');
+                alertGranny(player.x, player.z);
+            } else if (closest.type === 'item_pliers') {
+                player.inventory.pliers = true;
+                document.getElementById('slot-pliers').classList.replace('text-zinc-600', 'text-blue-400');
+                document.getElementById('slot-pliers').classList.add('border-blue-500');
+                scene.remove(closest.mesh);
+                interactiveObjects.splice(interactiveObjects.indexOf(closest), 1);
+                playSound('pickup');
+                setStatus('أخذت الكماشة ✂️! اقطع أسلاك صندوق الكهرباء الأحمر.');
+                alertGranny(player.x, player.z);
+            } else if (closest.type === 'item_key') {
+                player.inventory.key = true;
+                document.getElementById('slot-key').classList.replace('text-zinc-600', 'text-yellow-400');
+                document.getElementById('slot-key').classList.add('border-yellow-500');
+                scene.remove(closest.mesh);
+                interactiveObjects.splice(interactiveObjects.indexOf(closest), 1);
+                playSound('pickup');
+                setStatus('أخذت المفتاح الذهبي 🗝️! افتح الباب الرئيسي.');
+                alertGranny(player.x, player.z);
+            } else if (closest.type === 'item_code') {
+                player.inventory.code = true;
+                document.getElementById('slot-code').classList.replace('text-zinc-600', 'text-cyan-400');
+                document.getElementById('slot-code').classList.add('border-cyan-500');
+                scene.remove(closest.mesh);
+                interactiveObjects.splice(interactiveObjects.indexOf(closest), 1);
+                playSound('pickup');
+                setStatus('أخذت بطاقة القبو 💳! توجه لباب القبو السري.');
+                alertGranny(player.x, player.z);
+            } else if (closest.type === 'main_door') {
+                if (!doorState.plankRemoved) {
+                    if (player.inventory.hammer) {
+                        doorState.plankRemoved = true;
+                        closest.plankMesh.visible = false;
+                        playSound('break');
+                        setStatus('تم كسر اللوح الخشبي! الآن اقطع الأسلاك أو افتح القفل.');
+                        alertGranny(player.x, player.z);
+                    } else {
+                        setStatus('تحتاج إلى المطرقة 🔨 لكسر اللوح الخشبي!');
+                    }
+                } else if (!doorState.wiresCut) {
+                    if (player.inventory.pliers) {
+                        doorState.wiresCut = true;
+                        closest.wireBox.material.color.setHex(0x16a34a);
+                        playSound('wirecut');
+                        setStatus('تم تعطيل الإنذار! استخدم المفتاح الذهبي 🗝️.');
+                        alertGranny(player.x, player.z);
+                    } else {
+                        setStatus('تحتاج إلى الكماشة ✂️ لقطع أسلاك صندوق الكهرباء!');
+                    }
+                } else if (!doorState.unlocked) {
+                    if (player.inventory.key) {
+                        doorState.unlocked = true;
+                        triggerWin('هربت من الباب الرئيسي بنجاح!');
+                    } else {
+                        setStatus('الباب مقفل! تحتاج إلى المفتاح الذهبي 🗝️.');
+                    }
+                }
+            } else if (closest.type === 'basement_door') {
+                if (!basementState.plankRemoved) {
+                    if (player.inventory.hammer) {
+                        basementState.plankRemoved = true;
+                        closest.plankMesh.visible = false;
+                        playSound('break');
+                        setStatus('كسرت قفل القبو! استخدم بطاقة القبو الزرقاء 💳.');
+                        alertGranny(player.x, player.z);
+                    } else {
+                        setStatus('باب القبو مغلق بلوح! تحتاج المطرقة 🔨.');
+                    }
+                } else if (!basementState.unlocked) {
+                    if (player.inventory.code) {
+                        basementState.unlocked = true;
+                        triggerWin('هربت عبر القبو السري بذكاء خارق!');
+                    } else {
+                        setStatus('تحتاج بطاقة القبو الزرقاء 💳 لفتح الباب الإلكتروني!');
+                    }
+                }
+            }
+            updateMissionsUI();
+        }
+
+        function alertGranny(soundX, soundZ) {
+            if (granny.state !== 'chase') {
+                granny.state = 'investigate';
+                granny.targetX = soundX;
+                granny.targetZ = soundZ;
+            }
+        }
+
+        function checkCollision(nx, nz) {
+            for (let i = 0; i < colliders.length; i++) {
+                const c = colliders[i];
+                if (nx > c.minX && nx < c.maxX && nz > c.minZ && nz < c.maxZ) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // --- GRANNY AI LOGIC (NIGHTMARE MODE) ---
+        function updateGrannyAI(delta) {
+            if (!granny.mesh) return;
+
+            const dx = player.x - granny.x;
+            const dz = player.z - granny.z;
+            const distToPlayer = Math.hypot(dx, dz);
+
+            // Threat indicator UI & Heartbeat Audio
+            const threatIndicator = document.getElementById('threat-indicator');
+            const vignette = document.getElementById('vignette');
+            if (distToPlayer < 9.5) {
+                threatIndicator.classList.remove('hidden');
+                vignette.classList.add('danger-vignette');
+                
+                granny.heartbeatTimer -= delta;
+                if (granny.heartbeatTimer <= 0) {
+                    playSound('heartbeat');
+                    granny.heartbeatTimer = Math.max(0.35, distToPlayer / 11);
+                }
+            } else {
+                threatIndicator.classList.add('hidden');
+                vignette.classList.remove('danger-vignette');
+            }
+
+            // Hearing Running Footsteps from far away
+            if (!player.isHiding && player.isRunning && distToPlayer < 19) {
+                if (granny.state !== 'chase') {
+                    granny.state = 'investigate';
+                    granny.targetX = player.x;
+                    granny.targetZ = player.z;
+                    setStatus('⚠️ جراني سمعت صوت ركضك وتتوجه لمكانك!');
+                }
+            }
+
+            // Line of Sight Detection (Cannot see player if hiding)
+            if (!player.isHiding) {
+                const angleToPlayer = Math.atan2(dx, dz);
+                let angleDiff = angleToPlayer - granny.mesh.rotation.y;
+                while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+                while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+
+                const canSee = (distToPlayer < 13 && Math.abs(angleDiff) < 1.25) || distToPlayer < 4.5;
+                if (canSee) {
+                    granny.state = 'chase';
+                    granny.targetX = player.x;
+                    granny.targetZ = player.z;
+                }
+            } else if (granny.state === 'chase') {
+                granny.state = 'search';
+                granny.searchTimer = 3.0;
+            }
+
+            // Catch Player Check (Only if not hiding)
+            if (!player.isHiding && distToPlayer < 1.3) {
+                triggerJumpscare();
+            }
+
+            // Granny Movement & Patrol/Chase Execution
+            let targetX = granny.x;
+            let targetZ = granny.z;
+            let currentGrannySpeed = granny.speed;
+
+            if (granny.state === 'chase') {
+                targetX = player.x;
+                targetZ = player.z;
+                currentGrannySpeed = granny.chaseSpeed;
+            } else if (granny.state === 'investigate') {
+                targetX = granny.targetX;
+                targetZ = granny.targetZ;
+                currentGrannySpeed = granny.chaseSpeed * 0.92;
+                if (Math.hypot(targetX - granny.x, targetZ - granny.z) < 1.2) {
+                    granny.state = 'search';
+                    granny.searchTimer = 2.8;
+                }
+            } else if (granny.state === 'search') {
+                granny.searchTimer -= delta;
+                granny.mesh.rotation.y += Math.sin(granny.searchTimer * 4.5) * 3.0 * delta;
+                if (granny.searchTimer <= 0) {
+                    granny.state = 'patrol';
+                }
+                return;
+            } else {
+                const wp = granny.waypoints[granny.waypointIndex];
+                targetX = wp.x;
+                targetZ = wp.z;
+                if (Math.hypot(targetX - granny.x, targetZ - granny.z) < 1.2) {
+                    granny.waypointIndex = (granny.waypointIndex + 1) % granny.waypoints.length;
+                }
+            }
+
+            const moveAngle = Math.atan2(targetX - granny.x, targetZ - granny.z);
+            const stepX = Math.sin(moveAngle) * currentGrannySpeed * delta;
+            const stepZ = Math.cos(moveAngle) * currentGrannySpeed * delta;
+
+            if (!checkCollision(granny.x + stepX, granny.z)) {
+                granny.x += stepX;
+            } else {
+                granny.waypointIndex = (granny.waypointIndex + 1) % granny.waypoints.length;
+            }
+
+            if (!checkCollision(granny.x, granny.z + stepZ)) {
+                granny.z += stepZ;
+            }
+
+            granny.mesh.position.set(granny.x, 0, granny.z);
+            granny.mesh.rotation.y = moveAngle;
+
+            // Creepy walking bob animation
+            granny.mesh.position.y = Math.abs(Math.sin(performance.now() * 0.011)) * 0.09;
+            granny.mesh.rotation.z = Math.sin(performance.now() * 0.011) * 0.06;
+        }
+
+        function triggerJumpscare() {
+            isPaused = true;
+            playSound('jumpscare');
+            document.exitPointerLock?.();
+
+            const overlay = document.getElementById('screen-overlay');
+            const title = document.getElementById('overlay-title');
+            const sub = document.getElementById('overlay-sub');
+            const visual = document.getElementById('jumpscare-visual');
+            const restartBtn = document.getElementById('restart-btn');
+
+            overlay.classList.remove('hidden');
+            visual.classList.remove('hidden');
+
+            if (currentDay < maxDays) {
+                currentDay++;
+                title.innerText = `أمسكت بك جراني! - اليوم ${currentDay}`;
+                sub.innerText = 'الدم يملأ المكان... لديك فرصة أخرى للهروب، لكنها أصبحت أسرع!';
+
+                setTimeout(() => {
+                    overlay.classList.add('hidden');
+                    visual.classList.add('hidden');
+                    resetPositionsForNextDay();
+                    isPaused = false;
+                }, 3200);
+            } else {
+                title.innerText = 'انتهت اللعبة! (الكابوس ابتلعك)';
+                sub.innerText = 'فشلت في الهروب خلال 5 أيام... جراني أنهت أمرك.';
+                restartBtn.classList.remove('hidden');
+            }
+        }
+
+        function resetPositionsForNextDay() {
+            player.x = 0;
+            player.z = 12;
+            player.yaw = 0;
+            player.pitch = 0;
+            player.trappedTimer = 0;
+            player.isHiding = false;
+            player.hidingSpot = null;
+
+            granny.x = 0;
+            granny.z = -12;
+            granny.state = 'patrol';
+            granny.speed += 0.35;
+            granny.chaseSpeed += 0.35;
+
+            document.getElementById('day-display').innerText = `اليوم ${currentDay} - كابوس`;
+            setStatus('استيقظت مجدداً... كن حذراً!');
+        }
+
+        function triggerWin(msg) {
+            isPaused = true;
+            playSound('pickup');
+            document.exitPointerLock?.();
+
+            const overlay = document.getElementById('screen-overlay');
+            const title = document.getElementById('overlay-title');
+            const sub = document.getElementById('overlay-sub');
+            const restartBtn = document.getElementById('restart-btn');
+
+            overlay.classList.remove('hidden');
+            title.classList.replace('text-red-600', 'text-green-500');
+            title.innerText = 'نجوت من الكابوس! 🎉';
+            sub.innerText = `${msg} في اليوم ${currentDay} من وضع الكابوس!`;
+            restartBtn.classList.remove('hidden');
+        }
+
+        // --- MAIN UPDATE LOOP ---
+        let lastTime = performance.now();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const now = performance.now();
+            const delta = Math.min((now - lastTime) / 1000, 0.1);
+            lastTime = now;
+
+            if (!gameStarted || isPaused) return;
+
+            // Player Movement
+            if (player.isHiding) {
+                camera.position.set(player.x, 1.5, player.z);
+                camera.rotation.y = player.yaw;
+                camera.rotation.x = player.pitch;
+            } else if (player.trappedTimer > 0) {
+                player.trappedTimer -= delta;
+                setStatus(`عالق في فخ الدب! تحرر خلال ${Math.ceil(player.trappedTimer)} ثوانٍ...`);
+            } else {
+                let forwardInput = 0;
+                let rightInput = 0;
+
+                if (keys['KeyW'] || keys['ArrowUp']) forwardInput += 1;
+                if (keys['KeyS'] || keys['ArrowDown']) forwardInput -= 1;
+                if (keys['KeyD'] || keys['ArrowRight']) rightInput += 1;
+                if (keys['KeyA'] || keys['ArrowLeft']) rightInput -= 1;
+
+                // Fixed Joystick Direction Mapping: Up = Forward, Down = Backward, Right = Right, Left = Left
+                if (Math.abs(joyVec.y) > 0.12) forwardInput -= joyVec.y;
+                if (Math.abs(joyVec.x) > 0.12) rightInput += joyVec.x;
+
+                const forwardX = -Math.sin(player.yaw);
+                const forwardZ = -Math.cos(player.yaw);
+                const rightX = Math.cos(player.yaw);
+                const rightZ = -Math.sin(player.yaw);
+
+                let moveX = forwardX * forwardInput + rightX * rightInput;
+                let moveZ = forwardZ * forwardInput + rightZ * rightInput;
+
+                const len = Math.hypot(moveX, moveZ);
+                if (len > 0) {
+                    moveX /= len;
+                    moveZ /= len;
+
+                    const spd = player.isRunning ? player.runSpeed : player.speed;
+                    const nextX = player.x + moveX * spd * delta;
+                    const nextZ = player.z + moveZ * spd * delta;
+
+                    if (!checkCollision(nextX, player.z)) player.x = nextX;
+                    if (!checkCollision(player.x, nextZ)) player.z = nextZ;
+
+                    // Footstep Audio & Camera Bobbing
+                    player.stepTimer -= delta * (player.isRunning ? 1.55 : 1.0);
+                    if (player.stepTimer <= 0) {
+                        playSound(player.isRunning ? 'runstep' : 'footstep');
+                        player.stepTimer = 0.44;
+                    }
+                    camera.position.y = 1.7 + Math.sin(now * (player.isRunning ? 0.015 : 0.009)) * 0.05;
+                } else {
+                    camera.position.y += (1.7 - camera.position.y) * 0.1;
+                }
+
+                // Check Bear Traps
+                bearTraps.forEach(trap => {
+                    if (!trap.triggered && Math.hypot(player.x - trap.x, player.z - trap.z) < 0.7) {
+                        trap.triggered = true;
+                        player.trappedTimer = 3.0;
+                        playSound('trap');
+                        alertGranny(player.x, player.z);
+                    }
+                });
+
+                camera.position.x = player.x;
+                camera.position.z = player.z;
+                camera.rotation.y = player.yaw;
+                camera.rotation.x = player.pitch;
+            }
+
+            // Update Flashlight
+            flashlight.position.copy(camera.position);
+            const lookDir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+            flashlight.target.position.copy(camera.position).add(lookDir.multiplyScalar(5));
+
+            // Update Interactive Prompt UI
+            const promptEl = document.getElementById('interact-prompt');
+            const crosshairEl = document.getElementById('crosshair');
+
+            if (player.isHiding) {
+                promptEl.classList.remove('hidden');
+                promptEl.innerText = 'اضغط [تفاعل] للخروج من الخزانة 🚪';
+                crosshairEl.classList.add('scale-150', 'border-amber-400');
+            } else {
+                let nearObj = null;
+                interactiveObjects.forEach(obj => {
+                    if (Math.hypot(player.x - obj.x, player.z - obj.z) < obj.radius) {
+                        nearObj = obj;
+                    }
+                });
+
+                if (nearObj) {
+                    promptEl.classList.remove('hidden');
+                    crosshairEl.classList.add('scale-150', 'border-amber-400');
+                    const labels = {
+                        'wardrobe': 'اضغط [تفاعل] للاختباء داخل الخزانة 🚪',
+                        'item_hammer': 'اضغط [تفاعل] لأخذ المطرقة 🔨',
+                        'item_pliers': 'اضغط [تفاعل] لأخذ الكماشة ✂️',
+                        'item_key': 'اضغط [تفاعل] لأخذ المفتاح الذهبي 🗝️',
+                        'item_code': 'اضغط [تفاعل] لأخذ بطاقة القبو 💳',
+                        'main_door': 'اضغط [تفاعل] على الباب الرئيسي 🚪',
+                        'basement_door': 'اضغط [تفاعل] على باب القبو السري 🔒'
+                    };
+                    promptEl.innerText = labels[nearObj.type] || 'اضغط [تفاعل]';
+                } else {
+                    promptEl.classList.add('hidden');
+                    crosshairEl.classList.remove('scale-150', 'border-amber-400');
+                }
+            }
+
+            // Animate Floating Items
+            interactiveObjects.forEach(obj => {
+                if (obj.type.startsWith('item_')) {
+                    obj.mesh.rotation.y += delta * 2.2;
+                }
+            });
+
+            // Update Granny AI
+            updateGrannyAI(delta);
+
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            if (!camera || !renderer) return;
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // Start Button Handler (Supports instant Touch & Click without delay)
+        const startBtn = document.getElementById('start-btn');
+        let startTriggered = false;
+
+        function startGameHandler(e) {
+            if (e) e.preventDefault();
+            if (startTriggered) return;
+            startTriggered = true;
+
+            initAudio();
+            if (audioCtx && audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+
+            document.getElementById('start-menu').classList.add('hidden');
+            document.getElementById('hud').classList.remove('hidden');
+            document.getElementById('joystick-zone').classList.remove('hidden');
+            document.getElementById('look-zone').classList.remove('hidden');
+            
+            // Attempt Fullscreen & Landscape Lock on mobile devices
+            try {
+                if (document.documentElement.requestFullscreen) {
+                    document.documentElement.requestFullscreen().catch(() => {});
+                }
+                if (screen.orientation && screen.orientation.lock) {
+                    screen.orientation.lock('landscape').catch(() => {});
+                }
+            } catch (err) {}
+
+            gameStarted = true;
+            initGame3D();
+        }
+
+        startBtn.addEventListener('click', startGameHandler);
+        startBtn.addEventListener('touchstart', startGameHandler, { passive: false });
+
+        // Restart Button Handler
+        const restartBtn = document.getElementById('restart-btn');
+        function restartGameHandler(e) {
+            if (e) e.preventDefault();
+            location.reload();
+        }
+        restartBtn.addEventListener('click', restartGameHandler);
+        restartBtn.addEventListener('touchstart', restartGameHandler, { passive: false });
+    </script>
+</body>
+</html>
